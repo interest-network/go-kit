@@ -2,8 +2,14 @@ package grpc
 
 import (
 	"context"
+	"encoding/base64"
+	"strings"
 
 	"google.golang.org/grpc/metadata"
+)
+
+const (
+	binHdrSuffix = "-bin"
 )
 
 // ClientRequestFunc may take information from context and use it to construct
@@ -28,3 +34,48 @@ type ServerResponseFunc func(ctx context.Context, header *metadata.MD, trailer *
 // are only executed in clients, after a request has been made, but prior to it
 // being decoded.
 type ClientResponseFunc func(ctx context.Context, header metadata.MD, trailer metadata.MD) context.Context
+
+// SetRequestHeader returns a ClientRequestFunc that sets the specified metadata
+// key-value pair.
+func SetRequestHeader(key, val string) ClientRequestFunc {
+	return func(ctx context.Context, md *metadata.MD) context.Context {
+		key, val := EncodeKeyValue(key, val)
+		(*md)[key] = append((*md)[key], val)
+		return ctx
+	}
+}
+
+// SetResponseHeader returns a ResponseFunc that sets the specified metadata
+// key-value pair.
+func SetResponseHeader(key, val string) ServerResponseFunc {
+	return func(ctx context.Context, md *metadata.MD, _ *metadata.MD) context.Context {
+		key, val := EncodeKeyValue(key, val)
+		(*md)[key] = append((*md)[key], val)
+		return ctx
+	}
+}
+
+// SetResponseTrailer returns a ResponseFunc that sets the specified metadata
+// key-value pair.
+func SetResponseTrailer(key, val string) ServerResponseFunc {
+	return func(ctx context.Context, _ *metadata.MD, md *metadata.MD) context.Context {
+		key, val := EncodeKeyValue(key, val)
+		(*md)[key] = append((*md)[key], val)
+		return ctx
+	}
+}
+
+// EncodeKeyValue sanitizes a key-value pair for use in gRPC metadata headers.
+func EncodeKeyValue(key, val string) (string, string) {
+	key = strings.ToLower(key)
+	if strings.HasSuffix(key, binHdrSuffix) {
+		val = base64.StdEncoding.EncodeToString([]byte(val))
+	}
+	return key, val
+}
+
+type contextKey int
+
+const (
+	ContextKeyRequestMethod contextKey = iota
+)

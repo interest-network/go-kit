@@ -43,8 +43,6 @@ func NewClient(
 		// use structs directly, while existing consumers will not break if they
 		// remain to use pointers to structs.
 		grpcReply: reflect.TypeOf(reflect.Indirect(reflect.ValueOf(grpcReply)).Interface()),
-		before:    []ClientRequestFunc{},
-		after:     []ClientResponseFunc{},
 	}
 	for _, option := range options {
 		option(c)
@@ -71,7 +69,7 @@ func ClientAfter(after ...ClientResponseFunc) ClientOption {
 // ClientFinalizer is executed at the end of every gRPC request.
 // By default, no finalizer is registered.
 func ClientFinalizer(f ...ClientFinalizerFunc) ClientOption {
-	return func(s *Client) { s.finalizer = append(s.finalizer, f...) }
+	return func(c *Client) { c.finalizer = append(c.finalizer, f...) }
 }
 
 // Endpoint returns a usable endpoint that will invoke the gRPC specified by the
@@ -81,13 +79,15 @@ func (c Client) Endpoint() endpoint.Endpoint {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		if c.finalizer != nil {
+		if len(c.finalizer) > 0 {
 			defer func() {
 				for _, f := range c.finalizer {
 					f(ctx, err)
 				}
 			}()
 		}
+
+		ctx = context.WithValue(ctx, ContextKeyRequestMethod, c.method)
 
 		req, err := c.enc(ctx, request)
 		if err != nil {

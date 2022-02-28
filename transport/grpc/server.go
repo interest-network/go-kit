@@ -21,10 +21,10 @@ type Server struct {
 	e            endpoint.Endpoint
 	dec          DecodeRequestFunc
 	enc          EncodeResponseFunc
+	errorHandler transport.ErrorHandler
 	before       []ServerRequestFunc
 	after        []ServerResponseFunc
 	finalizer    []ServerFinalizerFunc
-	errorHandler transport.ErrorHandler
 }
 
 // NewServer constructs a new server, which implements wraps the provided
@@ -36,12 +36,14 @@ func NewServer(
 	e endpoint.Endpoint,
 	dec DecodeRequestFunc,
 	enc EncodeResponseFunc,
+	errorHandler transport.ErrorHandler,
 	options ...ServerOption,
 ) *Server {
 	s := &Server{
-		e:   e,
-		dec: dec,
-		enc: enc,
+		e:            e,
+		dec:          dec,
+		enc:          enc,
+		errorHandler: errorHandler,
 	}
 	for _, option := range options {
 		option(s)
@@ -51,6 +53,12 @@ func NewServer(
 
 // ServerOption sets an optional parameter for servers.
 type ServerOption func(*Server)
+
+// ServerErrorHandler is used to handle non-terminal errors. By default, non-terminal errors
+// are ignored.
+func ServerErrorHandler(errorHandler transport.ErrorHandler) ServerOption {
+	return func(s *Server) { s.errorHandler = errorHandler }
+}
 
 // ServerBefore functions are executed on the gRPC request object before the
 // request is decoded.
@@ -68,12 +76,6 @@ func ServerAfter(after ...ServerResponseFunc) ServerOption {
 // By default, no finalizer is registered.
 func ServerFinalizer(f ...ServerFinalizerFunc) ServerOption {
 	return func(s *Server) { s.finalizer = append(s.finalizer, f...) }
-}
-
-// ServerErrorHandler is used to handle non-terminal errors. By default, non-terminal errors
-// are ignored.
-func ServerErrorHandler(errorHandler transport.ErrorHandler) ServerOption {
-	return func(s *Server) { s.errorHandler = errorHandler }
 }
 
 // ServeGRPC implements the Handler interface.
@@ -140,4 +142,13 @@ func (s Server) ServeGRPC(ctx context.Context, req interface{}) (retctx context.
 	}
 
 	return ctx, grpcResp, nil
+}
+
+// Interceptor is a grpc UnaryInterceptor that injects the method name into
+// context so it can be consumed by Go kit gRPC middlewares. The Interceptor
+// typically is added at creation time of the grpc-go server.
+// Like this: `grpc.NewServer(grpc.UnaryInterceptor(kitgrpc.Interceptor))`
+func Interceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+	ctx = context.WithValue(ctx, ContextKeyRequestMethod, info.FullMethod)
+	return handler(ctx, req)
 }
